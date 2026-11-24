@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Frontend-Only Live Seller Radar</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; background: #121212; color: #fff; }
+    .bar {
+      padding: 12px 20px; background: #1e1e1e; border-bottom: 1px solid #333;
+      display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    }
+    button { padding: 8px 14px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; }
+    .btn-gps { background: #00e676; color: #000; }
+    .btn-sim { background: #2979ff; color: #fff; }
+    #map { height: calc(100vh - 58px); width: 100%; }
+    .pill { background: #2c2c2c; padding: 5px 12px; border-radius: 20px; font-size: 13px; }
+  </style>
+</head>
+<body>
+
+  <div class="bar">
+    <div>
+      <strong>Admin Map (mark 1)</strong> &nbsp;
+      <span class="pill">Live Sellers: <span id="count">0</span></span>
+    </div>
+    <div>
+      <button class="btn-gps" onclick="startRealSeller()">Share My Real GPS (This Tab)</button>
+      <button class="btn-sim" onclick="startSimulatedSeller()">Simulate Moving Seller (This Tab)</button>
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // 1. Setup Map
+    const startCoords = [21.1938, 81.3509];
+    const map = L.map('map').setView(startCoords, 13);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '© OpenStreetMap'
+}).addTo(map);
+
+    // 2. BroadcastChannel connects all open tabs on your browser without a backend
+    const channel = new BroadcastChannel('live_food_sellers');
+    const markers = {}; // Stores markers by sellerId
+    const mySellerId = 'Seller_' + Math.floor(100 + Math.random() * 900);
+
+    // 3. ADMIN LISTENER: Receive coordinates from other tabs
+    channel.onmessage = (event) => {
+      const { type, id, name, lat, lng } = event.data;
+
+      if (type === 'UPDATE_LOCATION') {
+        if (markers[id]) {
+          markers[id].setLatLng([lat, lng]);
+        } else {
+          markers[id] = L.marker([lat, lng])
+            .addTo(map)
+            .bindPopup(`<b>${name}</b>`)
+            .openPopup();
+        }
+      } else if (type === 'SELLER_OFFLINE' && markers[id]) {
+        map.removeLayer(markers[id]);
+        delete markers[id];
+      }
+
+      document.getElementById('count').innerText = Object.keys(markers).length;
+    };
+
+    // Clean up marker if a seller tab is closed
+    window.addEventListener('beforeunload', () => {
+      channel.postMessage({ type: 'SELLER_OFFLINE', id: mySellerId });
+    });
+
+    // 4. SELLER OPTION A: Real Device GPS
+    function startRealSeller() {
+      if (!navigator.geolocation) return alert('Geolocation not supported');
+      navigator.geolocation.watchPosition((pos) => {
+        const payload = {
+          type: 'UPDATE_LOCATION',
+          id: mySellerId,
+          name: `${mySellerId} (Real GPS)`,
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude
+        };
+        // Send to other tabs AND update own map
+        channel.postMessage(payload);
+        channel.onmessage({ data: payload });
+      }, (err) => alert(err.message), { enableHighAccuracy: true });
+    }
+
+    // 5. SELLER OPTION B: Simulated Movement (for desk testing)
+    function startSimulatedSeller() {
+      let lat = startCoords[0] + (Math.random() - 0.5) * 0.02;
+      let lng = startCoords[1] + (Math.random() - 0.5) * 0.02;
+
+      setInterval(() => {
+        lat += (Math.random() - 0.48) * 0.0007;
+        lng += (Math.random() - 0.48) * 0.0007;
+        const payload = {
+          type: 'UPDATE_LOCATION',
+          id: mySellerId,
+          name: `${mySellerId} (Simulated)`,
+          lat,
+          lng
+        };
+        channel.postMessage(payload);
+        channel.onmessage({ data: payload });
+      }, 1500);
+    }
+  </script>
+</body>
+</html>
